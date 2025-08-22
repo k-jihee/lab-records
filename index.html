@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>제품별 분석 입력 · 월별 기록 · 추이/집계</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#111827;--ink:#e5e7eb;--muted:#94a3b8;--accent:#60a5fa;--border:#1f2937}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0f172a);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    header{position:sticky;top:0;background:rgba(15,23,42,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:16px 20px}
+    h1{margin:0;font-size:18px}
+    .wrap{max-width:1200px;margin:0 auto;padding:18px}
+    .grid{display:grid;grid-template-columns:340px 1fr;gap:16px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.4);padding:14px}
+    label{display:block;font-size:12px;color:var(--muted);margin:8px 0 6px}
+    input,select,button,textarea{border-radius:12px;border:1px solid var(--border);padding:10px 12px;background:#0b1220;color:var(--ink);width:100%}
+    select{cursor:pointer}
+    button{cursor:pointer;font-weight:700}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .pill{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:11px}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .btn-primary{background:linear-gradient(135deg,#2563eb,#60a5fa);border:none}
+    .hint{color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>제품별 분석 입력 · 월별 기록 · 추이/집계 <span class="pill">Google Sheets 저장</span></h1>
+  </header>
+  <div class="wrap">
+    <section class="card">
+      <h3 style="margin:6px 0 10px">① 제품/배치 정보</h3>
+      <label>제품명</label>
+      <select id="productSelect"></select>
+      <div class="row">
+        <div>
+          <label>배치/LOT</label>
+          <input id="lot" placeholder="예: 2025-08-22-01" />
+        </div>
+        <div>
+          <label>실험/측정 일시</label>
+          <input id="ts" type="datetime-local" />
+        </div>
+      </div>
+      <hr style="border-color:var(--border);margin:14px 0">
+      <h3 style="margin:0 0 10px">② 분석항목 입력</h3>
+      <form id="dynamicForm"></form>
+      <div class="toolbar" style="margin-top:12px">
+        <button id="saveBtn" class="btn-primary">저장(Google Sheets)</button>
+        <button id="clearBtn" type="button">입력값 초기화</button>
+      </div>
+      <p class="hint" style="margin-top:8px">* Google Sheets URL이 없으면 저장되지 않습니다.</p>
+      <div style="margin-top:10px">
+        <label>Google Apps Script Web App URL (필수)</label>
+        <input id="gasUrl" placeholder="https://script.google.com/macros/s/AKfycbx.../exec" />
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // ====== 0) 제품별 분석항목 정의(표준화) ======
+    const PRODUCT_SCHEMAS = {
+      "옥수수": [
+        { key: "산지", label: "산지" },
+        { key: "모선명", label: "모선명" },
+        { key: "수분", label: "수분(%)", spec: "15% ↓" },
+        { key: "용중_중", label: "용적중(중)", spec: "685g/l ↑" },
+        { key: "용중_미", label: "용적중(미)", spec: "695g/l ↑" },
+        { key: "손상립", label: "손상립(%)" },
+        { key: "파쇄립", label: "파쇄립(%)" },
+        { key: "이물", label: "이물(%)", spec: "1% 이하" },
+        { key: "옥세분진", label: "옥세분진(%)" },
+        { key: "전분가", label: "전분가(%)" },
+        { key: "조단백", label: "조단백(%)" },
+        { key: "조지방", label: "조지방(%)" },
+        { key: "조회분", label: "조회분(%)" },
+        { key: "조섬유", label: "조섬유(%)" },
+        { key: "발아율", label: "발아율(%)" }
+      ],
+      "수전분": [
+        { key: "ABS배출조단백", label: "ABS배출조단백(%)", spec: "0.350% ↓" },
+        { key: "HC전조단백", label: "H/C 전 조단백(%)", spec: "0.350% ↓" },
+        { key: "Grits", label: "Grits(%)", spec: "0.1% ↓" },
+        { key: "회분", label: "회분(%)", spec: "0.15% ↓" }
+      ]
+    };
+
+    // ====== Google Sheets 저장 ======
+    const productSelect = document.getElementById('productSelect');
+    const form = document.getElementById('dynamicForm');
+    const tsInput = document.getElementById('ts');
+    const lotInput = document.getElementById('lot');
+    const gasUrl = document.getElementById('gasUrl');
+
+    function fillProducts(){
+      productSelect.innerHTML='';
+      Object.keys(PRODUCT_SCHEMAS).forEach(p=>{
+        const opt=document.createElement('option'); opt.value=p; opt.textContent=p; productSelect.appendChild(opt);
+      });
+    }
+
+    function renderForm(){
+      const p = productSelect.value; const schema = PRODUCT_SCHEMAS[p]||[];
+      form.innerHTML='';
+      schema.forEach(fld=>{
+        const w = document.createElement('div'); w.style.marginBottom='10px';
+        const lab=document.createElement('label'); lab.textContent=fld.label; w.appendChild(lab);
+        if (fld.spec) { const sp=document.createElement('div'); sp.className='hint'; sp.textContent=`규격: ${fld.spec}`; w.appendChild(sp); }
+        const inp=document.createElement('input'); inp.type='text'; inp.dataset.key=fld.key; w.appendChild(inp);
+        form.appendChild(w);
+      });
+    }
+
+    async function syncToSheet(rec){
+      const url = gasUrl.value.trim(); if(!url){ alert('Google Sheets URL을 입력하세요'); return; }
+      try{
+        const res = await fetch(url,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rec) });
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        alert('저장 완료 · 구글시트 동기화 OK');
+      }catch(err){ alert('구글시트 동기화 실패: '+err); }
+    }
+
+    async function onSave(e){
+      e.preventDefault();
+      const p = productSelect.value; const schema = PRODUCT_SCHEMAS[p]||[];
+      const data={};
+      for(const el of form.querySelectorAll('input')){ const key=el.dataset.key; if(!key) continue; if(el.value!=='') data[schema.find(s=>s.key===key).label] = el.value; }
+      const dt = tsInput.value? new Date(tsInput.value): new Date();
+      const rec = {
+        id: crypto.randomUUID(),
+        product: p,
+        lot: lotInput.value||'',
+        ts: dt.toISOString().replace('T',' ').slice(0,16),
+        data
+      };
+      await syncToSheet(rec);
+      form.reset();
+    }
+
+    fillProducts(); renderForm();
+    const now = new Date();
+    tsInput.value = new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    productSelect.addEventListener('change', renderForm);
+    document.getElementById('saveBtn').addEventListener('click', onSave);
+    document.getElementById('clearBtn').addEventListener('click', ()=> form.reset());
+  </script>
+</body>
+</html>
