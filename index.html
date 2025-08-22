@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>제품별 분석 입력 · 월별 기록 · 추이/집계 (CSV 스키마 로더)</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#111827;--ink:#e5e7eb;--muted:#94a3b8;--accent:#60a5fa;--border:#1f2937}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0f172a);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    header{position:sticky;top:0;background:rgba(15,23,42,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:16px 20px}
+    h1{margin:0;font-size:18px}
+    .wrap{max-width:1200px;margin:0 auto;padding:18px}
+    .grid{display:grid;grid-template-columns:360px 1fr;gap:16px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.4);padding:14px}
+    label{display:block;font-size:12px;color:var(--muted);margin:8px 0 6px}
+    input,select,button,textarea{border-radius:12px;border:1px solid var(--border);padding:10px 12px;background:#0b1220;color:var(--ink);width:100%}
+    select{cursor:pointer}
+    button{cursor:pointer;font-weight:700}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .pill{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:11px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--border);padding:10px;text-align:left;font-size:13px}
+    th{color:var(--muted);font-weight:600}
+    .right{text-align:right}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .btn-primary{background:linear-gradient(135deg,#2563eb,#60a5fa);border:none}
+    .hint{color:var(--muted);font-size:12px}
+  </style>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>제품별 분석 입력 · 월별 기록 · 추이/집계 <span class="pill">GitHub Pages + CSV 스키마 로더</span></h1>
+  </header>
+  <div class="wrap">
+    <div class="grid">
+      <section class="card">
+        <h3 style="margin:6px 0 10px">① 스키마 로딩 (필수 1회)</h3>
+        <div class="hint" style="margin-top:-6px">CSV 열(헤더)은 <b>품목, 항목, 규격</b> 이어야 합니다. (사용하신 파일 그대로 가능)</div>
+        <div class="row" style="margin-bottom:8px">
+          <div>
+            <label>스키마 CSV 선택</label>
+            <input id="schemaFile" type="file" accept=".csv,text/csv" />
+          </div>
+          <div>
+            <label style="visibility:hidden">불러오기</label>
+            <button id="loadSchemaBtn" type="button" class="btn-primary">스키마 반영</button>
+          </div>
+        </div>
+        <div class="hint">불러온 스키마는 브라우저에만 보관됩니다. (새로고침 후에는 다시 불러오거나, 아래 <code>config.js</code>에 고정하세요)</div>
+        <hr style="border-color:var(--border);margin:14px 0">
+        <h3 style="margin:0 0 10px">② 제품/배치 정보</h3>
+        <label>제품명</label>
+        <select id="productSelect"></select>
+        <div class="row">
+          <div>
+            <label>배치/LOT</label>
+            <input id="lot" placeholder="예: 2025-08-22-01" />
+          </div>
+          <div>
+            <label>실험/측정 일시</label>
+            <input id="ts" type="datetime-local" />
+          </div>
+        </div>
+        <hr style="border-color:var(--border);margin:14px 0">
+        <h3 style="margin:0 0 10px">③ 분석항목 입력</h3>
+        <form id="dynamicForm"></form>
+        <div class="toolbar" style="margin-top:12px">
+          <button id="saveBtn" class="btn-primary">저장(월별 기록 반영)</button>
+          <button id="clearBtn" type="button">입력값 초기화</button>
+        </div>
+        <p class="hint" style="margin-top:8px">* 저장 시 브라우저에 보관됩니다(IndexedDB). 아래에 Google Sheets 연동을 넣으면 중앙저장도 됩니다.</p>
+        <div style="margin-top:10px">
+          <label>Google Apps Script Web App URL (선택)</label>
+          <input id="gasUrl" placeholder="https://script.google.com/macros/s/AKfycbx.../exec" />
+        </div>
+      </section>
+
+      <section class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:6px 0 10px">④ 월별 기록</h3>
+          <div class="toolbar">
+            <input id="monthPicker" type="month" />
+            <button id="exportCsvBtn" type="button">CSV 내보내기</button>
+            <button id="purgeBtn" type="button">로컬기록 비우기</button>
+          </div>
+        </div>
+        <div id="records"></div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:16px">
+      <h3 style="margin:6px 0 10px">⑤ 분석 / 그래프 (멀티지표 지원)</h3>
+      <div class="row">
+        <div>
+          <label>기간 시작</label>
+          <input id="anaStart" type="date" />
+        </div>
+        <div>
+          <label>기간 종료</label>
+          <input id="anaEnd" type="date" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>제품 비교(복수 선택)</label>
+          <select id="anaProducts" multiple style="height:110px"></select>
+          <div class="hint">* Ctrl/Shift로 여러 개 선택 (모바일은 길게 탭)</div>
+        </div>
+        <div>
+          <label>지표(분석항목) <span class="hint">* 복수 선택</span></label>
+          <select id="anaMetrics" multiple style="height:110px"></select>
+          <div class="row" style="margin-top:8px">
+            <div>
+              <label>이동평균(윈도우)</label>
+              <input id="anaMA" type="number" min="1" step="1" value="1" />
+            </div>
+            <div>
+              <label>표시 옵션</label>
+              <select id="anaMode">
+                <option value="lines">라인</option>
+                <option value="markers">마커</option>
+                <option value="lines+markers" selected>라인+마커</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar" style="margin-top:10px">
+        <button id="anaRun" class="btn-primary">그래프 그리기</button>
+        <button id="anaPNG" type="button">PNG 저장</button>
+      </div>
+      <div id="anaChart" style="height:520px;margin-top:12px"></div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <h3 style="margin:6px 0 10px">⑥ 월별 집계표</h3>
+      <div class="row">
+        <div>
+          <label>시작 월</label>
+          <input id="aggStart" type="month" />
+        </div>
+        <div>
+          <label>종료 월</label>
+          <input id="aggEnd" type="month" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>제품(복수 선택)</label>
+          <select id="aggProducts" multiple style="height:110px"></select>
+        </div>
+        <div>
+          <label>지표(복수 선택)</label>
+          <select id="aggMetrics" multiple style="height:110px"></select>
+        </div>
+      </div>
+      <div class="toolbar" style="margin-top:10px">
+        <button id="aggRun" class="btn-primary">집계 갱신</button>
+        <button id="aggCSV" type="button">CSV 내보내기</button>
+      </div>
+      <div id="aggTable" style="margin-top:12px"></div>
+    </section>
+
+  </div>
+
+  <script>
+    // ===== 0) 전역 스키마 (초기 비어 있음) =====
+    window.PRODUCT_SCHEMAS = window.PRODUCT_SCHEMAS || {};
+
+    // ===== 1) IndexedDB =====
+    const DB_NAME = 'lab-rec-db';
+    const DB_STORE = 'records';
+    function openDB(){ return new Promise((resolve,reject)=>{ const req = indexedDB.open(DB_NAME,1); req.onupgradeneeded=()=>{ req.result.createObjectStore(DB_STORE,{keyPath:'id'}); }; req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error); }); }
+    async function putRecord(rec){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readwrite'); tx.objectStore(DB_STORE).put(rec); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); }); }
+    async function getByMonth(yyyyMM){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readonly'); const st=tx.objectStore(DB_STORE); const out=[]; st.openCursor().onsuccess=e=>{ const c=e.target.result; if(!c) return; if((c.value.month||'')===yyyyMM) out.push(c.value); c.continue(); }; tx.oncomplete=()=>res(out); tx.onerror=()=>rej(tx.error); }); }
+    async function getAllRecords(){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readonly'); const st=tx.objectStore(DB_STORE); const out=[]; st.openCursor().onsuccess=e=>{ const c=e.target.result; if(!c) return; out.push(c.value); c.continue(); }; tx.oncomplete=()=>res(out); tx.onerror=()=>rej(tx.error); }); }
+    async function clearAll(){ const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readwrite'); tx.objectStore(DB_STORE).clear(); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); }); }
+
+    // ===== 2) UI refs =====
+    const productSelect = document.getElementById('productSelect');
+    const form = document.getElementById('dynamicForm');
+    const monthPicker = document.getElementById('monthPicker');
+    const recordsDiv = document.getElementById('records');
+    const tsInput = document.getElementById('ts');
+    const lotInput = document.getElementById('lot');
+    const gasUrl = document.getElementById('gasUrl');
+
+    function yyyymm(dt){ return dt.toISOString().slice(0,7).replace('-',''); }
+
+    function fillProducts(){
+      productSelect.innerHTML='';
+      Object.keys(window.PRODUCT_SCHEMAS).forEach(p=>{ const opt=document.createElement('option'); opt.value=p; opt.textContent=p; productSelect.appendChild(opt); });
+      if(!Object.keys(window.PRODUCT_SCHEMAS).length){ const opt=document.createElement('option'); opt.value=''; opt.textContent='(먼저 스키마를 불러오세요)'; productSelect.appendChild(opt); }
+    }
+
+    function renderForm(){
+      const p = productSelect.value; const schema = (window.PRODUCT_SCHEMAS[p]||[]);
+      form.innerHTML='';
+      schema.forEach(fld=>{
+        const w=document.createElement('div'); w.style.marginBottom='10px';
+        const lab=document.createElement('label'); lab.textContent=fld.label; w.appendChild(lab);
+        if(fld.spec){ const sp=document.createElement('div'); sp.className='hint'; sp.textContent='규격: '+fld.spec; w.appendChild(sp); }
+        const inp=document.createElement('input'); inp.type='number'; inp.step='any'; inp.dataset.key=fld.key; w.appendChild(inp);
+        form.appendChild(w);
+      });
+    }
+
+    async function renderMonth(){
+      const ym = monthPicker.value.replace('-','');
+      const list = await getByMonth(ym);
+      if(!list.length){ recordsDiv.innerHTML='<div class="hint">기록 없음</div>'; return; }
+      const keys = new Set(['일시','제품','LOT']);
+      list.forEach(r=> Object.keys(r.data).forEach(k=> keys.add(k)) );
+      const cols = Array.from(keys);
+      const th = cols.map(c=>`<th>${c}</th>`).join('');
+      const rows = list.map(r=>{
+        const tds = cols.map(c=>{
+          if(c==='일시') return `<td>${r.ts}</td>`;
+          if(c==='제품') return `<td>${r.product}</td>`;
+          if(c==='LOT') return `<td>${r.lot||''}</td>`;
+          return `<td class="right">${r.data[c] ?? ''}</td>`;
+        }).join('');
+        return `<tr>${tds}</tr>`;
+      }).join('');
+      recordsDiv.innerHTML = `<table><thead><tr>${th}</tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    async function exportCsv(){
+      const ym = monthPicker.value.replace('-','');
+      const rows = await getByMonth(ym); if(!rows.length){ alert('내보낼 데이터가 없습니다.'); return; }
+      const cols = new Set(['ts','product','lot']); rows.forEach(r=> Object.keys(r.data).forEach(k=> cols.add(k)) );
+      const header = Array.from(cols);
+      const lines=[header.join(',')];
+      rows.forEach(r=>{ const obj={ ts:r.ts, product:r.product, lot:r.lot, ...r.data }; lines.push(header.map(h=> obj[h]??'').join(',')); });
+      const blob = new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`records_${ym}.csv`; a.click();
+    }
+
+    async function syncToSheet(rec){
+      const url = (window.LAB_APP_CONFIG?.GAS_URL || gasUrl.value || '').trim(); if(!url) return { ok:false, skipped:true };
+      try{ const res = await fetch(url,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rec) }); if(!res.ok) throw new Error('HTTP '+res.status); return { ok:true }; }
+      catch(err){ console.error('Sheet sync failed',err); return { ok:false, error:String(err) } }
+    }
+
+    async function onSave(e){
+      e.preventDefault();
+      const p = productSelect.value; const schema = (window.PRODUCT_SCHEMAS[p]||[]);
+      if(!p){ alert('먼저 스키마를 불러오고 제품을 선택하세요.'); return; }
+      const data={};
+      for(const el of form.querySelectorAll('input')){ const key=el.dataset.key; if(!key) continue; const v=el.value; if(v!==''&&v!=null){ const fld = schema.find(s=>s.key===key); data[fld?.label||key] = Number(v); } }
+      const dt = tsInput.value? new Date(tsInput.value): new Date();
+      const rec = { id: crypto.randomUUID(), product: p, lot: lotInput.value||'', ts: dt.toISOString().replace('T',' ').slice(0,16), month: yyyymm(dt), data };
+      await putRecord(rec);
+      const sync = await syncToSheet(rec);
+      if(sync.ok) alert('저장 완료 · 구글시트 동기화 OK'); else if(sync.skipped) alert('저장 완료 (로컬) · 구글시트 URL 미설정'); else alert('저장 완료 (로컬) · 구글시트 동기화 실패: '+sync.error);
+      await renderMonth(); form.reset();
+    }
+
+    // 초기화
+    const now = new Date();
+    tsInput.value = new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    monthPicker.value = new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,7);
+    productSelect.addEventListener('change', renderForm);
+    document.getElementById('saveBtn').addEventListener('click', onSave);
+    document.getElementById('clearBtn').addEventListener('click', ()=> form.reset());
+    document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+    document.getElementById('purgeBtn').addEventListener('click', async()=>{ if(confirm('로컬 기록을 비우시겠습니까?')){ await clearAll(); await renderMonth(); } });
+    monthPicker.addEventListener('change', renderMonth);
+    renderMonth(); fillProducts();
+
+    // ===== 3) 그래프/분석 =====
+    function dateToLocalISO(d){ return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }
+    function ma(arr, w){ if(w<=1) return arr.slice(); const out=[]; let s=0; for(let i=0;i<arr.length;i++){ s+=arr[i]; if(i>=w) s-=arr[i-w]; out.push(i>=w-1? s/w : NaN);} return out; }
+
+    async function refreshSelectors(){
+      const anaProducts = document.getElementById('anaProducts');
+      const anaMetrics = document.getElementById('anaMetrics');
+      const all = await getAllRecords();
+      const products = Array.from(new Set(all.map(r=>r.product))).sort();
+      anaProducts.innerHTML=''; products.forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p; anaProducts.appendChild(o); });
+      const metricSet = new Set(); all.forEach(r=> Object.keys(r.data||{}).forEach(k=> metricSet.add(k)) );
+      anaMetrics.innerHTML=''; Array.from(metricSet).sort().forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; anaMetrics.appendChild(o); });
+      const anaEnd = document.getElementById('anaEnd'); const anaStart = document.getElementById('anaStart');
+      if(!anaEnd.value){ anaEnd.value = dateToLocalISO(new Date()); }
+      if(!anaStart.value){ const d=new Date(); d.setDate(d.getDate()-30); anaStart.value = dateToLocalISO(d); }
+    }
+
+    async function runAnalytics(){
+      const start = new Date(document.getElementById('anaStart').value+'T00:00:00');
+      const end = new Date(document.getElementById('anaEnd').value+'T23:59:59');
+      const w = Math.max(1, parseInt(document.getElementById('anaMA').value||'1',10));
+      const mode = document.getElementById('anaMode').value;
+      const selectedProducts = Array.from(document.getElementById('anaProducts').selectedOptions).map(o=>o.value);
+      const selectedMetrics = Array.from(document.getElementById('anaMetrics').selectedOptions).map(o=>o.value);
+      const all = await getAllRecords();
+      const products = selectedProducts.length? selectedProducts : Array.from(new Set(all.map(r=>r.product)));
+      const metrics = selectedMetrics.length? selectedMetrics : Array.from(new Set(all.flatMap(r=>Object.keys(r.data||{}))));
+
+      const traces=[];
+      products.forEach(prod=>{
+        metrics.forEach(metric=>{
+          const rows = all.filter(r=> r.product===prod && r.data && r.data.hasOwnProperty(metric))
+                          .filter(r=>{ const t=new Date(r.ts.replace(' ','T')); return t>=start && t<=end; })
+                          .sort((a,b)=> new Date(a.ts.replace(' ','T')) - new Date(b.ts.replace(' ','T')));
+          if(!rows.length) return;
+          const x = rows.map(r=> r.ts.replace(' ','T'));
+          const y = rows.map(r=> Number(r.data[metric]));
+          traces.push({ x, y, mode, type:'scatter', name: `${prod} · ${metric}` });
+          if(w>1){ const yMA = ma(y, w); traces.push({ x, y: yMA, mode:'lines', type:'scatter', name: `${prod} · ${metric} (MA${w})`, line:{dash:'dot'} }); }
+        });
+      });
+
+      if(!traces.length){ Plotly.purge('anaChart'); document.getElementById('anaChart').innerHTML = '<div class="hint">선택한 조건에 데이터가 없습니다.</div>'; return; }
+      const layout={ margin:{l:50,r:20,t:40,b:50}, paper_bgcolor:'#111827', plot_bgcolor:'#0b1220', font:{color:'#e5e7eb'}, xaxis:{title:'일시', type:'date', gridcolor:'#1f2937', zerolinecolor:'#1f2937'}, yaxis:{ title: '값', gridcolor:'#1f2937', zerolinecolor:'#1f2937'}, legend:{orientation:'h'} };
+      Plotly.newPlot('anaChart', traces, layout, {responsive:true, displaylogo:false});
+    }
+
+    document.getElementById('anaRun').addEventListener('click', runAnalytics);
+    document.getElementById('anaPNG').addEventListener('click', ()=>{ Plotly.toImage('anaChart', {format:'png', height:520, width:960}).then(png=>{ const a=document.createElement('a'); a.href=png; a.download='analytics.png'; a.click(); }); });
+    refreshSelectors();
+
+    // ===== 4) 월별 집계 =====
+    function yyyymm_dash(d){ return d.toISOString().slice(0,7); }
+    function firstDayOfMonth(ym){ return new Date(ym+'-01T00:00:00'); }
+    function lastDayOfMonth(ym){ const [y,m]=ym.split('-').map(Number); return new Date(y, m, 0, 23,59,59); }
+
+    async function initAgg(){
+      const all = await getAllRecords();
+      const products = Array.from(new Set(all.map(r=>r.product))).sort();
+      const metrics = Array.from(new Set(all.flatMap(r=>Object.keys(r.data||{})))).sort();
+      const ap = document.getElementById('aggProducts');
+      const am = document.getElementById('aggMetrics');
+      ap.innerHTML=''; products.forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p; ap.appendChild(o); });
+      am.innerHTML=''; metrics.forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; am.appendChild(o); });
+      const end = new Date(); const start = new Date(); start.setMonth(end.getMonth()-5);
+      document.getElementById('aggEnd').value = yyyymm_dash(end);
+      document.getElementById('aggStart').value = yyyymm_dash(start);
+      document.getElementById('aggRun').addEventListener('click', renderAgg);
+      document.getElementById('aggCSV').addEventListener('click', exportAggCSV);
+      renderAgg();
+    }
+
+    async function renderAgg(){
+      const all = await getAllRecords();
+      const ps = Array.from(document.getElementById('aggProducts').selectedOptions).map(o=>o.value);
+      const ms = Array.from(document.getElementById('aggMetrics').selectedOptions).map(o=>o.value);
+      const startYM = document.getElementById('aggStart').value; const endYM = document.getElementById('aggEnd').value;
+      const start = firstDayOfMonth(startYM); const end = lastDayOfMonth(endYM);
+
+      const filtered = all.filter(r=>{ const t=new Date(r.ts.replace(' ','T')); const inDate=t>=start && t<=end; const inProd=!ps.length || ps.includes(r.product); return inDate && inProd; });
+      if(!filtered.length){ document.getElementById('aggTable').innerHTML = '<div class="hint">집계할 데이터가 없습니다.</div>'; return; }
+
+      const key = (ym,p,m)=> ym+'__'+p+'__'+m; const map=new Map();
+      filtered.forEach(r=>{ const ym=r.ts.slice(0,7); const metrics= ms.length? ms : Object.keys(r.data||{}); metrics.forEach(m=>{ if(!(m in (r.data||{}))) return; const k=key(ym,r.product,m); if(!map.has(k)) map.set(k,[]); map.get(k).push(Number(r.data[m])); }); });
+
+      const rows=[]; map.forEach((vals,k)=>{ const [ym,prod,metric]=k.split('__'); const n=vals.length; const avg=vals.reduce((a,b)=>a+b,0)/n; const min=Math.min(...vals); const max=Math.max(...vals); rows.push({ 월:ym, 제품:prod, 지표:metric, 개수:n, 평균:avg, 최소:min, 최대:max }); });
+      rows.sort((a,b)=> a.월.localeCompare(b.월) || a.제품.localeCompare(b.제품) || a.지표.localeCompare(b.지표));
+
+      const headers=['월','제품','지표','개수','평균','최소','최대'];
+      const thead='<thead><tr>'+headers.map(h=>`<th>${h}</th>`).join('')+'</tr></thead>';
+      const tbody='<tbody>'+rows.map(r=>'<tr>'+headers.map(h=>`<td>${(h==='평균')? Number(r[h]).toFixed(4): r[h]}</td>`).join('')+'</tr>').join('')+'</tbody>';
+      document.getElementById('aggTable').innerHTML = `<table>${thead}${tbody}</table>`;
+      window.__aggRows = rows;
+    }
+
+    function exportAggCSV(){ const rows=window.__aggRows||[]; if(!rows.length){ alert('내보낼 집계가 없습니다.'); return; } const headers=['월','제품','지표','개수','평균','최소','최대']; const lines=[headers.join(',')].concat(rows.map(r=> headers.map(h=> r[h]).join(','))); const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='월별집계.csv'; a.click(); }
+
+    initAgg();
+
+    // ===== 5) 스키마 CSV 로더 =====
+    function rowsFromCSV(text){
+      const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+      if(!lines.length) return [];
+      const header = lines[0].split(',');
+      const idx = {
+        prod: header.findIndex(h=> /품/.test(h)),
+        item: header.findIndex(h=> /항/.test(h)),
+        spec: header.findIndex(h=> /규/.test(h))
+      };
+      const rows = []; let currentProd='';
+      for(let i=1;i<lines.length;i++){
+        const cols = lines[i].split(',');
+        const prod = (cols[idx.prod]||'').trim();
+        const item = (cols[idx.item]||'').trim();
+        const spec = (cols[idx.spec]||'').trim();
+        if(prod) currentProd = prod; if(!currentProd || !item) continue;
+        rows.push({ prod: currentProd, item, spec });
+      }
+      return rows;
+    }
+    function makeKey(label){ return (label||'').replace(/\s+/g,'').replace(/[^A-Za-z0-9가-힣_]/g,'').slice(0,40) || 'field'; }
+    function buildSchema(rows){ const out={}; rows.forEach(r=>{ out[r.prod]=out[r.prod]||[]; const e={ key: makeKey(r.item), label:r.item }; if(r.spec) e.spec=r.spec; out[r.prod].push(e); }); return out; }
+    document.getElementById('loadSchemaBtn').addEventListener('click', ()=>{
+      const f = document.getElementById('schemaFile').files?.[0]; if(!f){ alert('CSV 파일을 선택하세요.'); return; }
+      const fr = new FileReader(); fr.onload=()=>{ const rows=rowsFromCSV(fr.result); if(!rows.length){ alert('유효한 데이터가 없습니다.'); return; } window.PRODUCT_SCHEMAS = buildSchema(rows); fillProducts(); renderForm(); refreshSelectors(); initAgg(); alert('스키마가 반영되었습니다.'); }; fr.readAsText(f);
+    });
+  </script>
+
+  <!-- Apps Script 백엔드 예시는 기존 문서 참고 -->
+</body>
+</html>
