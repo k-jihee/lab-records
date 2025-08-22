@@ -5,37 +5,39 @@ import json, os, uuid
 
 CSV_FILE = "제품명, 분석항목.csv"
 
-# CSV 읽기
-try:
-    df_csv = pd.read_csv(CSV_FILE)
-except Exception as e:
-    st.error(f"CSV 파일 불러오기 오류: {e}")
+df = pd.read_csv(CSV_FILE)
+df.columns = [c.strip() for c in df.columns]
+
+if not ("제품명" in df.columns and "분석항목" in df.columns):
+    st.error("CSV에 '제품명', '분석항목' 컬럼이 없습니다.")
     st.stop()
 
-# 컬럼 정리 (공백 제거)
-df_csv.columns = [c.strip() for c in df_csv.columns]
-
-if not ("제품명" in df_csv.columns and "분석항목" in df_csv.columns):
-    st.error("CSV에 '제품명' 또는 '분석항목' 컬럼이 없습니다. 실제 컬럼명을 확인하세요.")
-    st.write("현재 CSV 컬럼:", list(df_csv.columns))
-    st.stop()
-
-# DataFrame 생성 (결과 칸 추가)
-df = df_csv.copy()
-df["결과"] = ""
-
-st.title("📊 일자별 제품 분석 (st.data_editor 버전)")
+st.title("📊 일자별 제품 분석 (HTML 테이블 스타일)")
 analysis_date = st.date_input("분석 일자", value=date.today())
 
-# Excel 스타일 에디터
-edited_df = st.data_editor(
-    df,
-    num_rows="dynamic",         # 행 추가 가능
-    use_container_width=True,   # 화면 너비에 맞게 표시
-    hide_index=True
-)
+# 제품별 그룹핑
+grouped = df.groupby("제품명")["분석항목"].apply(list).to_dict()
 
-# 저장 파일
+results = {}
+
+for product, items in grouped.items():
+    st.subheader(f"📦 {product}")
+    table_html = "<table style='width:100%; border-collapse: collapse;'>"
+    table_html += "<tr><th style='border:1px solid #ddd;padding:8px;'>항목명</th><th style='border:1px solid #ddd;padding:8px;'>결과</th></tr>"
+    st.markdown(table_html, unsafe_allow_html=True)
+
+    prod_results = {}
+    for item in items:
+        col1, col2 = st.columns([2,3])
+        with col1:
+            st.markdown(f"<div style='padding:8px;border:1px solid #ddd'>{item}</div>", unsafe_allow_html=True)
+        with col2:
+            val = st.text_input(f"{product}_{item}", key=f"{product}_{item}")
+            prod_results[item] = val
+    results[product] = prod_results
+    st.markdown("<br>", unsafe_allow_html=True)
+
+# 저장 로직
 SAVE_FILE = "daily_product_reports.json"
 if not os.path.exists(SAVE_FILE):
     with open(SAVE_FILE, "w", encoding="utf-8") as f:
@@ -51,17 +53,12 @@ def save_report(data):
     with open(SAVE_FILE, "w", encoding="utf-8") as f:
         json.dump(reports, f, ensure_ascii=False, indent=2)
 
-# 저장 버튼
 if st.button("저장"):
     reports = []
-    for product in edited_df["제품명"].unique():
-        items = edited_df[edited_df["제품명"] == product][["분석항목", "결과"]]
+    for product, items in results.items():
         reports.append({
             "productName": product,
-            "analysisItems": [
-                {"itemName": row["분석항목"], "result": row["결과"]}
-                for _, row in items.iterrows()
-            ]
+            "analysisItems": [{"itemName": k, "result": v} for k, v in items.items()]
         })
     data = {
         "id": str(uuid.uuid4()),
@@ -71,12 +68,3 @@ if st.button("저장"):
     save_report(data)
     st.success("저장 완료 ✅")
     st.json(data)
-
-# 저장된 보고서 보기
-st.header("📂 저장된 보고서")
-for rep in load_reports():
-    with st.expander(f"📅 {rep['analysisDate']} (총 {len(rep['reports'])}개 제품)"):
-        for product_report in rep["reports"]:
-            st.write(f"### {product_report['productName']}")
-            for item in product_report["analysisItems"]:
-                st.write(f"- {item['itemName']}: {item['result']}")
