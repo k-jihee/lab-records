@@ -1,87 +1,71 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
-import json, os, uuid
+import json
 
-# 📌 페이지 설정 (가로 전체 레이아웃)
-st.set_page_config(layout="wide")
-
-CSV_FILE = "제품명, 분석항목.csv"
-
-# CSV 읽기
-try:
-    df_csv = pd.read_csv(CSV_FILE)
-except Exception as e:
-    st.error(f"CSV 파일 불러오기 오류: {e}")
-    st.stop()
-
-# 컬럼 이름 정리
-df_csv.columns = [c.strip() for c in df_csv.columns]
-
-# 필수 컬럼 확인
-if not ("제품명" in df_csv.columns and "분석항목" in df_csv.columns):
-    st.error("CSV에 '제품명' 또는 '분석항목' 컬럼이 없습니다.")
-    st.write("현재 CSV 컬럼:", list(df_csv.columns))
-    st.stop()
-
-# 결과 컬럼 추가
-df = df_csv.copy()
-df["결과"] = ""
-
-st.title("📊 일자별 제품 분석 (확장된 Excel 스타일)")
-analysis_date = st.date_input("분석 일자", value=date.today())
-
-# Excel 스타일 데이터 에디터 (화면 크게)
-edited_df = st.data_editor(
-    df,
-    num_rows="dynamic",
-    use_container_width=True,  # 화면 전체 폭 사용
-    height=700,                # 세로 크게 (필요하면 900~1000까지도 가능)
-    hide_index=True
-)
-
-# 저장 파일
 SAVE_FILE = "daily_product_reports.json"
-if not os.path.exists(SAVE_FILE):
-    with open(SAVE_FILE, "w", encoding="utf-8") as f:
-        json.dump([], f, ensure_ascii=False, indent=2)
 
 def load_reports():
     with open(SAVE_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def save_report(data):
-    reports = load_reports()
-    reports.append(data)
-    with open(SAVE_FILE, "w", encoding="utf-8") as f:
-        json.dump(reports, f, ensure_ascii=False, indent=2)
+st.header("📈 데이터 분석 / 추이 변화")
 
-# 저장 버튼
-if st.button("저장"):
-    reports = []
-    for product in edited_df["제품명"].unique():
-        items = edited_df[edited_df["제품명"] == product][["분석항목", "결과"]]
-        reports.append({
-            "productName": product,
-            "analysisItems": [
-                {"itemName": row["분석항목"], "result": row["결과"]}
-                for _, row in items.iterrows()
-            ]
-        })
-    data = {
-        "id": str(uuid.uuid4()),
-        "analysisDate": str(analysis_date),
-        "reports": reports
-    }
-    save_report(data)
-    st.success("저장 완료 ✅")
-    st.json(data)
+# 데이터 로드
+reports = load_reports()
 
-# 저장된 보고서 보기
-st.header("📂 저장된 보고서")
-for rep in load_reports():
-    with st.expander(f"📅 {rep['analysisDate']} (총 {len(rep['reports'])}개 제품)"):
-        for product_report in rep["reports"]:
-            st.write(f"### {product_report['productName']}")
-            for item in product_report["analysisItems"]:
-                st.write(f"- {item['itemName']}: {item['result']}")
+# JSON → DataFrame 변환
+rows = []
+for rep in reports:
+    date = rep["analysisDate"]
+    for prod in rep["reports"]:
+        pname = prod["productName"]
+        for item in prod["analysisItems"]:
+            try:
+                val = float(item["result"])
+            except:
+                val = None
+            rows.append({
+                "analysisDate": date,
+                "productName": pname,
+                "itemName": item["itemName"],
+                "result": val
+            })
+df = pd.DataFrame(rows)
+
+if df.empty:
+    st.info("저장된 데이터가 없습니다.")
+else:
+    st.subheader("📌 원시 데이터 테이블")
+    st.dataframe(df)
+
+    # -----------------------------
+    # 1) 한 제품의 항목별 추이
+    # -----------------------------
+    st.subheader("📊 단일 제품 · 항목 추이")
+    prod_sel = st.selectbox("제품 선택", df["productName"].unique(), key="prod_sel")
+    item_sel = st.selectbox(
+        "항목 선택",
+        df[df["productName"]==prod_sel]["itemName"].unique(),
+        key="item_sel"
+    )
+
+    filtered = df[(df["productName"]==prod_sel) & (df["itemName"]==item_sel)]
+    filtered = filtered.sort_values("analysisDate")
+
+    st.line_chart(filtered.set_index("analysisDate")["result"])
+
+    # -----------------------------
+    # 2) 여러 제품 간 비교
+    # -----------------------------
+    st.subheader("📊 여러 제품 간 비교 (동일 항목)")
+    item_sel2 = st.selectbox("비교할 항목 선택", df["itemName"].unique(), key="item_sel2")
+
+    compare_df = df[df["itemName"]==item_sel2].pivot(
+        index="analysisDate", columns="productName", values="result"
+    ).sort_index()
+
+    st.write("🔹 제품별 추이 (Line chart)")
+    st.line_chart(compare_df)
+
+    st.write("🔹 제품별 값 비교 (Bar chart)")
+    st.bar_chart(compare_df)
