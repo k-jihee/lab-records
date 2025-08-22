@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>제품 일보 (HTML 단일파일)</title>
+  <meta name="color-scheme" content="light">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root { --brand:#06b6d4 }
+    .btn { @apply px-5 py-3 rounded-xl font-semibold; }
+  </style>
+</head>
+<body class="bg-cyan-50 text-slate-900">
+  <div class="max-w-6xl mx-auto p-4 md:p-8 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-3xl md:text-4xl font-extrabold">제품 일보</h1>
+      <div class="flex gap-2">
+        <button id="btnExport" class="btn text-white" style="background:var(--brand)">CSV 내보내기</button>
+        <label class="btn border bg-white cursor-pointer">
+          CSV 가져오기
+          <input id="fileImport" type="file" accept=".csv" class="hidden" />
+        </label>
+        <button id="btnClear" class="btn border bg-white">전체 초기화</button>
+      </div>
+    </header>
+
+    <!-- 입력 폼 -->
+    <section class="rounded-2xl border bg-white p-5">
+      <h2 class="text-xl font-bold mb-4">데이터 입력</h2>
+      <form id="entryForm" class="grid md:grid-cols-3 gap-3">
+        <input class="border rounded-xl p-3" id="제품명" placeholder="제품명" required>
+        <input class="border rounded-xl p-3" id="제품코드" placeholder="제품코드">
+        <input class="border rounded-xl p-3" id="제조일자" type="date" placeholder="제조일자">
+        <input class="border rounded-xl p-3" id="분석일자" type="date" placeholder="분석일자" required>
+        <input class="border rounded-xl p-3" id="Lot" placeholder="Lot">
+        <input class="border rounded-xl p-3" id="라인" placeholder="라인">
+        <input class="border rounded-xl p-3" id="항목명" placeholder="항목명" required>
+        <input class="border rounded-xl p-3" id="측정값" placeholder="측정값">
+        <input class="border rounded-xl p-3" id="단위" placeholder="단위">
+        <input class="border rounded-xl p-3 md:col-span-3" id="비고" placeholder="비고">
+        <div class="md:col-span-3 flex gap-2">
+          <button class="btn text-white" style="background:var(--brand)">추가</button>
+          <span id="status" class="self-center text-sm text-slate-600"></span>
+        </div>
+      </form>
+    </section>
+
+    <!-- 필터 & 차트 -->
+    <section class="rounded-2xl border bg-white p-5">
+      <h2 class="text-xl font-bold mb-4">추이 차트</h2>
+      <div class="grid md:grid-cols-4 gap-3 mb-3 items-end">
+        <input class="border rounded-xl p-3" id="fProduct" placeholder="제품명 필터">
+        <input class="border rounded-xl p-3" id="fItem" placeholder="항목명 필터">
+        <input class="border rounded-xl p-3" id="fFrom" type="date" placeholder="시작">
+        <input class="border rounded-xl p-3" id="fTo" type="date" placeholder="종료">
+      </div>
+      <div class="flex gap-2 mb-4">
+        <button id="btnFilter" class="btn text-white" style="background:var(--brand)">조회</button>
+        <button id="btnReset" class="btn border bg-white">초기화</button>
+      </div>
+      <div class="h-72"><canvas id="trendChart"></canvas></div>
+    </section>
+
+    <!-- 데이터 표 -->
+    <section class="rounded-2xl border bg-white p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold">저장 데이터</h2>
+        <div class="text-sm text-slate-500">브라우저에만 저장됩니다(localStorage).</div>
+      </div>
+      <div class="overflow-auto">
+        <table class="w-full text-left" id="dataTable">
+          <thead>
+            <tr class="border-b">
+              <th class="p-2">제품명</th>
+              <th class="p-2">제품코드</th>
+              <th class="p-2">제조일자</th>
+              <th class="p-2">분석일자</th>
+              <th class="p-2">Lot</th>
+              <th class="p-2">라인</th>
+              <th class="p-2">항목명</th>
+              <th class="p-2">측정값</th>
+              <th class="p-2">단위</th>
+              <th class="p-2">비고</th>
+              <th class="p-2">삭제</th>
+            </tr>
+          </thead>
+          <tbody id="dataBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="text-center text-slate-500 py-6">© 제품 일보 • HTML 단일파일</footer>
+  </div>
+
+<script>
+  const KEY = "pdr.rows.v1";
+  let rows = JSON.parse(localStorage.getItem(KEY) || "[]");
+  let chart;
+
+  function save() { localStorage.setItem(KEY, JSON.stringify(rows)); }
+  function toRow(){
+    const g = id => document.getElementById(id).value.trim();
+    return { 제품명:g("제품명"), 제품코드:g("제품코드"), 제조일자:g("제조일자"), 분석일자:g("분석일자"), Lot:g("Lot"), 라인:g("라인"), 항목명:g("항목명"), 측정값:g("측정값"), 단위:g("단위"), 비고:g("비고") };
+  }
+
+  function renderTable(data){
+    const tb = document.getElementById("dataBody");
+    tb.innerHTML = data.map((r,i)=>`
+      <tr class="border-b">
+        <td class="p-2">${r.제품명}</td>
+        <td class="p-2">${r.제품코드||""}</td>
+        <td class="p-2">${r.제조일자||""}</td>
+        <td class="p-2">${r.분석일자||""}</td>
+        <td class="p-2">${r.Lot||""}</td>
+        <td class="p-2">${r.라인||""}</td>
+        <td class="p-2">${r.항목명||""}</td>
+        <td class="p-2">${r.측정값||""}</td>
+        <td class="p-2">${r.단위||""}</td>
+        <td class="p-2">${r.비고||""}</td>
+        <td class="p-2"><button data-i="${i}" class="del px-3 py-1 rounded-lg border">삭제</button></td>
+      </tr>
+    `).join("");
+    tb.querySelectorAll(".del").forEach(btn=>btn.addEventListener("click",e=>{
+      const i = Number(e.target.getAttribute("data-i"));
+      rows.splice(i,1); save(); renderAll();
+    }));
+  }
+
+  function renderChart(data, p, item, from, to){
+    const inRange = d => (!from || d>=from) && (!to || d<=to);
+    const list = data.filter(r => (!p || r.제품명.includes(p)) && (!item || r.항목명.includes(item)) && r.분석일자 && r.측정값!=="" && inRange(r.분석일자));
+    const map = new Map();
+    list.forEach(r=>{
+      const d=r.분석일자; const v=Number(r.측정값); if(!Number.isFinite(v)) return;
+      if(!map.has(d)) map.set(d,[]); map.get(d).push(v);
+    });
+    const labels=[...map.keys()].sort();
+    const values=labels.map(k=>{const a=map.get(k);return a.reduce((x,y)=>x+y,0)/a.length});
+    const ctx=document.getElementById("trendChart");
+    if(chart) chart.destroy();
+    chart=new Chart(ctx,{type:"line",data:{labels,datasets:[{label:`${p||"전체"} - ${item||"항목"}`,data:values}]},options:{responsive:true,maintainAspectRatio:false}});
+  }
+
+  function renderAll(){
+    renderTable(rows);
+    renderChart(rows, document.getElementById("fProduct").value.trim(), document.getElementById("fItem").value.trim(), document.getElementById("fFrom").value, document.getElementById("fTo").value);
+  }
+
+  document.getElementById("entryForm").addEventListener("submit",e=>{
+    e.preventDefault();
+    const row = toRow();
+    rows.push(row); save(); renderAll();
+    e.target.reset();
+    document.getElementById("status").textContent = "추가 완료 (브라우저에 저장됨)";
+    setTimeout(()=>document.getElementById("status").textContent="",2000);
+  });
+
+  document.getElementById("btnFilter").addEventListener("click",()=>renderAll());
+  document.getElementById("btnReset").addEventListener("click",()=>{
+    document.getElementById("fProduct").value="";
+    document.getElementById("fItem").value="";
+    document.getElementById("fFrom").value="";
+    document.getElementById("fTo").value="";
+    renderAll();
+  });
+
+  document.getElementById("btnExport").addEventListener("click",()=>{
+    const header=["제품명","제품코드","제조일자","분석일자","Lot","라인","항목명","측정값","단위","비고"];
+    const lines=[header.join(",")].concat(rows.map(r=>header.map(h=>`"${(r[h]||"").replaceAll('"','""')}"`).join(",")));
+    const blob=new Blob(["\ufeff"+lines.join("\n")],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob); const a=document.createElement("a");
+    a.href=url; a.download="제품일보.csv"; a.click(); URL.revokeObjectURL(url);
+  });
+
+  document.getElementById("fileImport").addEventListener("change",(e)=>{
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const text=reader.result+""; const arr=parseCSV(text);
+      rows = rows.concat(arr); save(); renderAll();
+    };
+    reader.readAsText(file,'utf-8');
+    e.target.value="";
+  });
+
+  function parseCSV(text){
+    const lines=text.trim().split(/\r?\n/);
+    const header=lines[0].split(",").map(s=>s.replace(/^"|"$/g,""));
+    const idx=(n)=>header.indexOf(n);
+    const out=[];
+    for(let i=1;i<lines.length;i++){
+      const cols=splitCSVLine(lines[i]);
+      out.push({
+        제품명:cols[idx("제품명")], 제품코드:cols[idx("제품코드")], 제조일자:cols[idx("제조일자")], 분석일자:cols[idx("분석일자")],
+        Lot:cols[idx("Lot")], 라인:cols[idx("라인")], 항목명:cols[idx("항목명")], 측정값:cols[idx("측정값")], 단위:cols[idx("단위")], 비고:cols[idx("비고")]
+      });
+    }
+    return out;
+  }
+  function splitCSVLine(line){
+    const out=[]; let cur="",q=false; for(const ch of line){
+      if(ch==='"'){ q=!q; continue } if(ch==="," && !q){ out.push(cur); cur=""; continue } cur+=ch;
+    } out.push(cur); return out;
+  }
+
+  document.getElementById("btnClear").addEventListener("click",()=>{
+    if(!confirm("브라우저에 저장된 데이터를 모두 지울까요?")) return;
+    rows=[]; save(); renderAll();
+  });
+
+  // 초기 렌더
+  renderAll();
+</script>
+</body>
+</html>
