@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>제품 분석 일보 (Standalone HTML)</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', Arial, sans-serif; }
+  </style>
+
+  <!-- React 18 (UMD dev builds for demo; switch to .production.min.js for prod) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Babel for in-browser JSX transform -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase compat SDKs (v10+) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <!--(Optional) Provide your runtime variables here -->
+  <script>
+    // ▼▼▼ 여기에 실제 Firebase 설정(JSON)과 앱 아이디, 커스텀 토큰을 채워 넣으세요 ▼▼▼
+    // 예: var __firebase_config = JSON.stringify({ apiKey: "…", authDomain: "…", projectId: "…" });
+    var __firebase_config = JSON.stringify({
+      // TODO: 실제 환경값으로 교체하세요
+      apiKey: "",
+      authDomain: "",
+      projectId: "",
+      storageBucket: "",
+      messagingSenderId: "",
+      appId: ""
+    });
+    var __app_id = "default-app-id";        // 필요 시 교체
+    var __initial_auth_token = null;        // 필요 시 커스텀 토큰 문자열로 교체
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+  </script>
+</head>
+<body class="bg-gray-50">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // --- Firebase 설정 (HTML 버전) ---
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    // compat 초기화
+    const app = firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    // --- 제품 카탈로그 ---
+    const PRODUCT_CATALOG = {
+      productA: {
+        name: '알파-아밀라아제 A-100',
+        code: 'APA-100',
+        analysisItems: [
+          { itemName: '성상', specification: '고유의 색과 향을 가진 분말', result: '' },
+          { itemName: '수분(%)', specification: '10 이하', result: '' },
+          { itemName: 'PH (3%)', specification: '4 ~ 7', result: '' },
+          { itemName: '역가(u/g)', specification: '100,000 이상', result: '' },
+        ],
+      },
+      productB: {
+        name: '베타-글루카나아제 B-200',
+        code: 'BGL-200',
+        analysisItems: [
+          { itemName: '성상', specification: '백색의 미세한 분말', result: '' },
+          { itemName: '수분(%)', specification: '8 이하', result: '' },
+          { itemName: '회분(%)', specification: '0.5 이하', result: '' },
+          { itemName: '역가(u/g)', specification: '200,000 이상', result: '' },
+          { itemName: '중금속(ppm)', specification: '10 이하', result: '' },
+        ],
+      },
+      productC: {
+        name: '셀룰라아제 C-300',
+        code: 'CEL-300',
+        analysisItems: [
+          { itemName: '성상', specification: '고유의 색과 향을 가진 분말', result: '' },
+          { itemName: '수분(%)', specification: '10 이하', result: '' },
+          { itemName: 'PH (3%)', specification: '4 ~ 7', result: '' },
+          { itemName: '조단백(%)', specification: '0.35 이하', result: '' },
+          { itemName: '회분(%)', specification: '0.2 이하', result: '' },
+          { itemName: '일반세균(cfu/g)', specification: '85 이상', result: '' },
+          { itemName: '광학적', specification: '26 이상', result: '' },
+          { itemName: '입도 #40 ON', specification: '3 이하', result: '' },
+          { itemName: '입도 #60 ON', specification: '10 ~ 40', result: '' },
+          { itemName: '입도 #120# ON', specification: '10 ~ 40', result: '' },
+          { itemName: '입도 #120# Pass', specification: '80 이상', result: '' },
+        ],
+      },
+      productCS: {
+        name: '옥수수전분',
+        code: 'GIC0032S',
+        analysisItems: [
+          { itemName: '성상', specification: '-', result: '' },
+          { itemName: '수분(%)', specification: '-', result: '' },
+          { itemName: '회분(%)', specification: '-', result: '' },
+          { itemName: 'pH(%)', specification: '-', result: '' },
+          { itemName: '백도', specification: '-', result: '' },
+          { itemName: '입도 #60 ON', specification: '-', result: '' },
+        ],
+      },
+    };
+
+    function App() {
+      const [userId, setUserId] = useState(null);
+      const [isAuthenticated, setIsAuthenticated] = useState(false);
+      const [productReports, setProductReports] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      const [isEditing, setIsEditing] = useState(false);
+      const [currentReportId, setCurrentReportId] = useState(null);
+      const [selectedProductKey, setSelectedProductKey] = useState('');
+      const [productName, setProductName] = useState('');
+      const [productCode, setProductCode] = useState('');
+      const [analysisDate, setAnalysisDate] = useState('');
+      const [analysisItems, setAnalysisItems] = useState([]);
+      const [analystName, setAnalystName] = useState('');
+
+      const [submitLoading, setSubmitLoading] = useState(false);
+
+      const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+      const [reportToDelete, setReportToDelete] = useState(null);
+      const [expandedReportId, setExpandedReportId] = useState(null);
+
+      useEffect(() => {
+        const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+          if (user) {
+            setUserId(user.uid);
+            setIsAuthenticated(true);
+          } else {
+            setUserId(null);
+            setIsAuthenticated(false);
+            setProductReports([]);
+          }
+          setLoading(false);
+        });
+
+        (async () => {
+          try {
+            if (initialAuthToken) {
+              await auth.signInWithCustomToken(initialAuthToken);
+            } else {
+              await auth.signInAnonymously();
+            }
+          } catch (e) {
+            console.error('Authentication failed:', e);
+            setError('인증에 실패했습니다.');
+          }
+        })();
+
+        return () => unsubscribeAuth();
+      }, []);
+
+      useEffect(() => {
+        if (!isAuthenticated || !userId) {
+          setLoading(false);
+          return;
+        }
+        const path = `artifacts/${appId}/users/${userId}/product_analysis_reports_v3`;
+        const colRef = db.collection(path);
+
+        const unsubscribeSnapshot = colRef.onSnapshot(
+          (snapshot) => {
+            const reports = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+            reports.sort((a, b) => new Date(b.analysisDate) - new Date(a.analysisDate));
+            setProductReports(reports);
+            setLoading(false);
+          },
+          (err) => {
+            console.error('Data loading error:', err);
+            setError('데이터를 불러오는 데 실패했습니다.');
+            setLoading(false);
+          }
+        );
+
+        return () => unsubscribeSnapshot();
+      }, [isAuthenticated, userId]);
+
+      const handleProductChange = (key) => {
+        setSelectedProductKey(key);
+        if (key && PRODUCT_CATALOG[key]) {
+          const product = PRODUCT_CATALOG[key];
+          setProductName(product.name);
+          setProductCode(product.code);
+          setAnalysisItems(JSON.parse(JSON.stringify(product.analysisItems)));
+        } else {
+          setProductName('');
+          setProductCode('');
+          setAnalysisItems([]);
+        }
+      };
+
+      const resetForm = () => {
+        setIsEditing(false);
+        setCurrentReportId(null);
+        setSelectedProductKey('');
+        setProductName('');
+        setProductCode('');
+        setAnalysisDate('');
+        setAnalysisItems([]);
+        setAnalystName('');
+      };
+
+      const handleItemResultChange = (index, value) => {
+        const updatedItems = [...analysisItems];
+        updatedItems[index].result = value;
+        setAnalysisItems(updatedItems);
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!isAuthenticated || !userId || !selectedProductKey) {
+          setError('제품을 선택해야 합니다.');
+          return;
+        }
+        setSubmitLoading(true);
+        setError(null);
+
+        const reportData = { productName, productCode, analysisDate, analysisItems, analystName };
+
+        try {
+          const basePath = `artifacts/${appId}/users/${userId}/product_analysis_reports_v3`;
+          if (isEditing) {
+            const reportDocRef = db.collection(basePath).doc(currentReportId);
+            await reportDocRef.update({ ...reportData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          } else {
+            const reportsCollectionRef = db.collection(basePath);
+            await reportsCollectionRef.add({ ...reportData, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+          }
+          resetForm();
+        } catch (err) {
+          console.error('Error saving document:', err);
+          setError('데이터 저장에 실패했습니다.');
+        } finally {
+          setSubmitLoading(false);
+        }
+      };
+
+      const handleEdit = (report) => {
+        window.scrollTo(0, 0);
+        setIsEditing(true);
+        setCurrentReportId(report.id);
+
+        const productKey = Object.keys(PRODUCT_CATALOG).find((key) => PRODUCT_CATALOG[key].code === report.productCode);
+        setSelectedProductKey(productKey || '');
+
+        setProductName(report.productName);
+        setProductCode(report.productCode);
+        setAnalysisDate(report.analysisDate);
+        setAnalystName(report.analystName || '');
+
+        const templateItems = productKey ? PRODUCT_CATALOG[productKey].analysisItems : [];
+        const mergedItems = templateItems.map((templateItem) => {
+          const foundItem = report.analysisItems.find((item) => item.itemName === templateItem.itemName);
+          return foundItem ? { ...templateItem, result: foundItem.result } : templateItem;
+        });
+        setAnalysisItems(mergedItems);
+      };
+
+      const openDeleteModal = (reportId) => {
+        setReportToDelete(reportId);
+        setIsDeleteModalOpen(true);
+      };
+
+      const handleDelete = async () => {
+        if (!reportToDelete || !userId) return;
+        try {
+          const path = `artifacts/${appId}/users/${userId}/product_analysis_reports_v3`;
+          const reportDocRef = db.collection(path).doc(reportToDelete);
+          await reportDocRef.delete();
+        } catch (e) {
+          console.error('Error deleting document:', e);
+          setError('데이터 삭제에 실패했습니다.');
+        } finally {
+          setIsDeleteModalOpen(false);
+          setReportToDelete(null);
+        }
+      };
+
+      const toggleExpandReport = (reportId) => {
+        setExpandedReportId(expandedReportId === reportId ? null : reportId);
+      };
+
+      if (loading) {
+        return <div className="flex items-center justify-center min-h-screen">로딩 중...</div>;
+      }
+
+      return (
+        <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+          <header className="bg-white shadow-md rounded-xl p-6 mb-8 text-center">
+            <h1 className="text-3xl font-bold text-gray-800">제품 분석 일보</h1>
+            <p className="text-sm text-gray-500 mt-2 break-all">사용자 ID: {userId || 'N/A'}</p>
+          </header>
+
+          {error && (
+            <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6" role="alert">
+              <p>{error}</p>
+            </div>
+          )}
+
+          {/* 입력/수정 폼 */}
+          <section className="bg-white rounded-xl shadow-md p-6 mb-8">
+            <div className="flex justify-between items-center border-b pb-3 mb-6">
+              <h2 className="text-2xl font-semibold text-gray-800">{isEditing ? '보고서 수정' : '새 보고서 작성'}</h2>
+              {isEditing && (
+                <button onClick={resetForm} className="text-sm text-gray-600 hover:text-indigo-600">
+                  취소
+                </button>
+              )}
+            </div>
+            <form onSubmit={handleSubmit}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">제품 선택</label>
+                  <select
+                    value={selectedProductKey}
+                    onChange={(e) => handleProductChange(e.target.value)}
+                    className="w-full p-2 border rounded-md bg-white"
+                    required
+                  >
+                    <option value="">-- 제품을 선택하세요 --</option>
+                    {Object.keys(PRODUCT_CATALOG).map((key) => (
+                      <option key={key} value={key}>
+                        {PRODUCT_CATALOG[key].name} ({PRODUCT_CATALOG[key].code})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">제품코드: {productCode || '—'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">분석 일자</label>
+                  <input
+                    type="date"
+                    value={analysisDate}
+                    onChange={(e) => setAnalysisDate(e.target.value)}
+                    className="w-full p-2 border rounded-md"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">분석자(작업자)</label>
+                  <input
+                    type="text"
+                    value={analystName}
+                    onChange={(e) => setAnalystName(e.target.value)}
+                    className="w-full p-2 border rounded-md"
+                    placeholder="예) 홍길동"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">※ 미입력 시 저장은 되지만 목록에는 미기재로 표시됩니다.</p>
+                </div>
+              </div>
+
+              {selectedProductKey && (
+                <>
+                  <h3 className="text-lg font-semibold text-gray-700 mb-4">분석 항목</h3>
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">항목명</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">규격</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">분석 결과</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {analysisItems.map((item, index) => (
+                          <tr key={index}>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{item.itemName}</td>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">{item.specification}</td>
+                            <td className="px-4 py-2">
+                              <input
+                                type="text"
+                                value={item.result}
+                                onChange={(e) => handleItemResultChange(index, e.target.value)}
+                                className="w-full p-1 border rounded-md text-sm"
+                                required
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex justify-end mt-6">
+                    <button
+                      type="submit"
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg"
+                      disabled={submitLoading}
+                    >
+                      {submitLoading ? '저장 중...' : isEditing ? '수정 완료' : '보고서 저장'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </form>
+          </section>
+
+          {/* 누적 보고서 목록 */}
+          <section className="bg-white rounded-xl shadow-md p-6">
+            <h2 className="text-2xl font-semibold text-gray-800 border-b pb-3 mb-4">누적 보고서 목록</h2>
+            <div className="space-y-4">
+              {productReports.length > 0 ? (
+                productReports.map((report) => (
+                  <div key={report.id} className="border rounded-lg overflow-hidden">
+                    <div
+                      className="bg-gray-50 p-4 flex justify-between items-center cursor-pointer"
+                      onClick={() => toggleExpandReport(report.id)}
+                    >
+                      <div>
+                        <p className="font-semibold text-indigo-700">
+                          {report.productName} ({report.productCode})
+                        </p>
+                        <p className="text-sm text-gray-500">{report.analysisDate}</p>
+                        <p className="text-sm text-gray-500">분석자: {report.analystName || '미기재'}</p>
+                      </div>
+                      <svg
+                        className={\`w-6 h-6 text-gray-500 transform transition-transform \${expandedReportId === report.id ? 'rotate-180' : ''}\`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+
+                    {expandedReportId === report.id && (
+                      <div className="p-4">
+                        <table className="min-w-full text-sm">
+                          <thead className="border-b">
+                            <tr>
+                              <th className="py-1 text-left font-medium">항목</th>
+                              <th className="py-1 text-left font-medium">규격</th>
+                              <th className="py-1 text-left font-medium">결과</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {report.analysisItems.map((item, index) => (
+                              <tr key={index} className="border-b last:border-none">
+                                <td className="py-1">{item.itemName}</td>
+                                <td className="py-1 text-gray-600">{item.specification}</td>
+                                <td className="py-1 font-medium">{item.result}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div className="flex justify-end space-x-3 mt-4">
+                          <button onClick={() => handleEdit(report)} className="text-sm text-blue-600 hover:underline">
+                            수정
+                          </button>
+                          <button onClick={() => openDeleteModal(report.id)} className="text-sm text-red-600 hover:underline">
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <p className="text-center text-gray-500 py-8">저장된 보고서가 없습니다.</p>
+              )}
+            </div>
+          </section>
+
+          {/* 삭제 확인 모달 */}
+          {isDeleteModalOpen && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-6 w-full max-w-sm">
+                <h3 className="text-lg font-bold mb-4">정말 삭제하시겠습니까?</h3>
+                <p className="text-sm text-gray-600 mb-6">이 작업은 되돌릴 수 없습니다.</p>
+                <div className="flex justify-end space-x-3">
+                  <button onClick={() => setIsDeleteModalOpen(false)} className="px-4 py-2 bg-gray-200 rounded-md">
+                    취소
+                  </button>
+                  <button onClick={handleDelete} className="px-4 py-2 bg-red-600 text-white rounded-md">
+                    삭제
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
