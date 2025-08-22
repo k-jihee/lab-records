@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>제품별 분석 입력 · 월별 기록</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#111827;--ink:#e5e7eb;--muted:#94a3b8;--accent:#60a5fa;--border:#1f2937}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0f172a);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    header{position:sticky;top:0;background:rgba(15,23,42,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:16px 20px}
+    h1{margin:0;font-size:18px}
+    .wrap{max-width:1200px;margin:0 auto;padding:18px}
+    .grid{display:grid;grid-template-columns:340px 1fr;gap:16px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.4);padding:14px}
+    label{display:block;font-size:12px;color:var(--muted);margin:8px 0 6px}
+    input,select,button,textarea{border-radius:12px;border:1px solid var(--border);padding:10px 12px;background:#0b1220;color:var(--ink);width:100%}
+    select{cursor:pointer}
+    button{cursor:pointer;font-weight:700}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .pill{display:inline-block;padding:4px 10px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:11px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--border);padding:10px;text-align:left;font-size:13px}
+    th{color:var(--muted);font-weight:600}
+    .right{text-align:right}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .btn-primary{background:linear-gradient(135deg,#2563eb,#60a5fa);border:none}
+    .hint{color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>제품별 분석항목 입력 · 월별 기록 <span class="pill">GitHub Pages + Google Sheets</span></h1>
+  </header>
+  <div class="wrap">
+    <div class="grid">
+      <section class="card">
+        <h3 style="margin:6px 0 10px">① 제품/배치 정보</h3>
+        <label>제품명</label>
+        <select id="productSelect"></select>
+        <div class="row">
+          <div>
+            <label>배치/LOT</label>
+            <input id="lot" placeholder="예: 2025-08-22-01" />
+          </div>
+          <div>
+            <label>실험/측정 일시</label>
+            <input id="ts" type="datetime-local" />
+          </div>
+        </div>
+        <hr style="border-color:var(--border);margin:14px 0">
+        <h3 style="margin:0 0 10px">② 분석항목 입력</h3>
+        <form id="dynamicForm"></form>
+        <div class="toolbar" style="margin-top:12px">
+          <button id="saveBtn" class="btn-primary">저장(월별 기록 반영)</button>
+          <button id="clearBtn" type="button">입력값 초기화</button>
+        </div>
+        <p class="hint" style="margin-top:8px">* 저장 시 이 브라우저의 오프라인 저장(IndexedDB)에 보관되고, 설정 시 구글시트에도 동기화됩니다.</p>
+        <div style="margin-top:10px">
+          <label>Google Apps Script Web App URL (선택)</label>
+          <input id="gasUrl" placeholder="https://script.google.com/macros/s/AKfycbx.../exec" />
+        </div>
+      </section>
+
+      <section class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:6px 0 10px">③ 월별 기록</h3>
+          <div class="toolbar">
+            <input id="monthPicker" type="month" />
+            <button id="exportCsvBtn" type="button">CSV 내보내기</button>
+            <button id="purgeBtn" type="button">로컬기록 비우기</button>
+          </div>
+        </div>
+        <div id="records"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    // ====== 0) 제품별 분석항목 정의(예시) ======
+    // 필요 시 파일로 분리하거나 GitHub JSON에서 fetch로 불러올 수 있습니다.
+    const PRODUCT_SCHEMAS = {
+      "정제포도당-무수": [
+        { key:"brix", label:"브릭스", unit:"°Bx", type:"number", step:"0.01", required:true },
+        { key:"moist", label:"수분", unit:"%", type:"number", step:"0.01" },
+        { key:"ash", label:"회분", unit:"%", type:"number", step:"0.001" },
+        { key:"color", label:"색도", unit:"IU", type:"number" },
+        { key:"ph", label:"pH", unit:"", type:"number", step:"0.01" }
+      ],
+      "정제포도당-함수": [
+        { key:"brix", label:"브릭스", unit:"°Bx", type:"number", step:"0.01", required:true },
+        { key:"DE", label:"DE(포도당당도)", unit:"%", type:"number", step:"0.1" },
+        { key:"visc", label:"점도", unit:"mPa·s", type:"number" },
+        { key:"color", label:"색도", unit:"IU", type:"number" }
+      ],
+      "전분-옥수수": [
+        { key:"moist", label:"수분", unit:"%", type:"number", step:"0.01" },
+        { key:"ash", label:"회분", unit:"%", type:"number", step:"0.001" },
+        { key:"whiteness", label:"백도", unit:"%", type:"number", step:"0.1" },
+        { key:"protein", label:"조단백", unit:"%", type:"number", step:"0.01" }
+      ]
+    };
+
+    // ====== 1) 간단한 IndexedDB 래퍼 ======
+    const DB_NAME = 'lab-rec-db';
+    const DB_STORE = 'records';
+    function openDB(){
+      return new Promise((resolve,reject)=>{
+        const req = indexedDB.open(DB_NAME,1);
+        req.onupgradeneeded = ()=>{ req.result.createObjectStore(DB_STORE,{keyPath:'id'}); };
+        req.onsuccess = ()=> resolve(req.result);
+        req.onerror = ()=> reject(req.error);
+      });
+    }
+    async function putRecord(rec){
+      const db = await openDB();
+      return new Promise((resolve,reject)=>{
+        const tx = db.transaction(DB_STORE,'readwrite');
+        tx.objectStore(DB_STORE).put(rec);
+        tx.oncomplete = ()=> resolve(true);
+        tx.onerror = ()=> reject(tx.error);
+      });
+    }
+    async function getByMonth(yyyyMM){
+      const db = await openDB();
+      return new Promise((resolve,reject)=>{
+        const tx = db.transaction(DB_STORE,'readonly');
+        const store = tx.objectStore(DB_STORE);
+        const out=[]; store.openCursor().onsuccess = e=>{
+          const c = e.target.result; if(!c) return;
+          if((c.value.month||'')===yyyyMM) out.push(c.value); c.continue();
+        };
+        tx.oncomplete = ()=> resolve(out);
+        tx.onerror = ()=> reject(tx.error);
+      });
+    }
+    async function clearAll(){ const db = await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readwrite'); tx.objectStore(DB_STORE).clear(); tx.oncomplete=()=>res(true); tx.onerror=()=>rej(tx.error); }); }
+
+    // ====== 2) UI 초기화 ======
+    const productSelect = document.getElementById('productSelect');
+    const form = document.getElementById('dynamicForm');
+    const monthPicker = document.getElementById('monthPicker');
+    const recordsDiv = document.getElementById('records');
+    const tsInput = document.getElementById('ts');
+    const lotInput = document.getElementById('lot');
+    const gasUrl = document.getElementById('gasUrl');
+
+    // 제품 드롭다운 채우기
+    function fillProducts(){
+      productSelect.innerHTML='';
+      Object.keys(PRODUCT_SCHEMAS).forEach(p=>{
+        const opt=document.createElement('option'); opt.value=p; opt.textContent=p; productSelect.appendChild(opt);
+      });
+    }
+
+    function yyyymm(dt){ return dt.toISOString().slice(0,7).replace('-',''); }
+
+    // 선택된 제품에 따라 동적 폼 생성
+    function renderForm(){
+      const p = productSelect.value; const schema = PRODUCT_SCHEMAS[p]||[];
+      form.innerHTML='';
+      schema.forEach(fld=>{
+        const w = document.createElement('div'); w.style.marginBottom='10px';
+        const lab=document.createElement('label'); lab.textContent=`${fld.label}${fld.unit?` (${fld.unit})`:''}`; w.appendChild(lab);
+        const inp=document.createElement('input');
+        inp.type=fld.type||'text'; if(fld.step) inp.step=fld.step; if(fld.required) inp.required=true; inp.dataset.key=fld.key; w.appendChild(inp);
+        form.appendChild(w);
+      });
+    }
+
+    // 월별 표 렌더링
+    async function renderMonth(){
+      const ym = monthPicker.value.replace('-','');
+      const list = await getByMonth(ym);
+      if(!list.length){ recordsDiv.innerHTML='<div class="hint">기록 없음</div>'; return; }
+      // 테이블 헤더 구성(제품 스키마 합집합)
+      const keys = new Set(['일시','제품','LOT']);
+      list.forEach(r=> Object.keys(r.data).forEach(k=> keys.add(k)) );
+      const cols = Array.from(keys);
+      const th = cols.map(c=>`<th>${c}</th>`).join('');
+      const rows = list.map(r=>{
+        const tds = cols.map(c=>{
+          if(c==='일시') return `<td>${r.ts}</td>`;
+          if(c==='제품') return `<td>${r.product}</td>`;
+          if(c==='LOT') return `<td>${r.lot||''}</td>`;
+          return `<td class="right">${r.data[c] ?? ''}</td>`;
+        }).join('');
+        return `<tr>${tds}</tr>`;
+      }).join('');
+      recordsDiv.innerHTML = `<table><thead><tr>${th}</tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    // CSV 내보내기
+    async function exportCsv(){
+      const ym = monthPicker.value.replace('-','');
+      const rows = await getByMonth(ym); if(!rows.length){ alert('내보낼 데이터가 없습니다.'); return; }
+      const cols = new Set(['ts','product','lot']); rows.forEach(r=> Object.keys(r.data).forEach(k=> cols.add(k)) );
+      const header = Array.from(cols);
+      const lines=[header.join(',')];
+      rows.forEach(r=>{ const obj={ ts:r.ts, product:r.product, lot:r.lot, ...r.data }; lines.push(header.map(h=> obj[h]??'').join(',')); });
+      const blob = new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`records_${ym}.csv`; a.click();
+    }
+
+    // Google Apps Script로 전송
+    async function syncToSheet(rec){
+      const url = (gasUrl.value||'').trim(); if(!url) return { ok:false, skipped:true };
+      try{
+        const res = await fetch(url,{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rec) });
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        return { ok:true };
+      }catch(err){ console.error('Sheet sync failed',err); return { ok:false, error:String(err) } }
+    }
+
+    // 저장 플로우
+    async function onSave(e){
+      e.preventDefault();
+      const p = productSelect.value; const schema = PRODUCT_SCHEMAS[p]||[];
+      const data={};
+      for(const el of form.querySelectorAll('input')){ const key=el.dataset.key; if(!key) continue; const v=el.value; if(v!==''&&v!=null) data[schema.find(s=>s.key===key).label] = Number(v); }
+      const dt = tsInput.value? new Date(tsInput.value): new Date();
+      const rec = {
+        id: crypto.randomUUID(),
+        product: p,
+        lot: lotInput.value||'',
+        ts: dt.toISOString().replace('T',' ').slice(0,16),
+        month: yyyymm(dt),
+        data
+      };
+      await putRecord(rec);
+      const sync = await syncToSheet(rec);
+      if(sync.ok) alert('저장 완료 · 구글시트 동기화 OK');
+      else if(sync.skipped) alert('저장 완료 (로컬) · 구글시트 URL 미설정');
+      else alert('저장 완료 (로컬) · 구글시트 동기화 실패: '+sync.error);
+      await renderMonth();
+      form.reset();
+    }
+
+    // 초기 값들
+    fillProducts(); renderForm();
+    const now = new Date();
+    tsInput.value = new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,16); // local
+    monthPicker.value = new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,7);
+
+    // 이벤트 바인딩
+    productSelect.addEventListener('change', renderForm);
+    document.getElementById('saveBtn').addEventListener('click', onSave);
+    document.getElementById('clearBtn').addEventListener('click', ()=> form.reset());
+    document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+    document.getElementById('purgeBtn').addEventListener('click', async()=>{ if(confirm('로컬 기록을 비우시겠습니까?')){ await clearAll(); await renderMonth(); } });
+    monthPicker.addEventListener('change', renderMonth);
+
+    renderMonth();
+  </script>
+
+  <!-- ↓↓↓ Google Apps Script (백엔드) 예시는 이 파일 하단 주석 참고 -->
+</body>
+</html>
+
+<!--
+======================== Google Apps Script (시트 백엔드) ========================
+1) 구글 드라이브에서 새 스프레드시트("Lab Records") 생성 → 앱스 스크립트 열기
+2) 아래 코드를 붙여넣고 배포: 배포 > 웹 앱 > 누구나(링크 있는 사람) 실행 허용
+3) 배포 URL을 위 페이지의 "Google Apps Script Web App URL"에 붙여넣기
+
+function doPost(e){
+  try{
+    var ss = SpreadsheetApp.openById('<<YOUR_SPREADSHEET_ID>>');
+    var sh = ss.getSheetByName('records') || ss.insertSheet('records');
+    var body = JSON.parse(e.postData.contents);
+    // 헤더 구성(동적으로 추가)
+    var fixed = ['ts','product','lot'];
+    var keys = Object.keys(body.data||{});
+    var headers = fixed.concat(keys);
+    var hrow = sh.getRange(1,1,1,sh.getLastColumn()||headers.length).getValues()[0];
+    // 헤더 업데이트
+    headers.forEach(function(h){ if(hrow.indexOf(h)===-1){ hrow.push(h); } });
+    sh.getRange(1,1,1,hrow.length).setValues([hrow]);
+    // 데이터 행 생성
+    var row = [body.ts, body.product, body.lot];
+    keys.forEach(function(k){ row[ hrow.indexOf(k) ] = body.data[k]; });
+    // 빈 칸 NaN 방지
+    for (var i=0;i<hrow.length;i++){ if(row[i]===undefined) row[i]=''; }
+    sh.appendRow(row);
+    // CORS 허용 응답
+    return ContentService.createTextOutput(JSON.stringify({ok:true}))
+      .setMimeType(ContentService.MimeType.JSON)
+      .setHeaders({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type'
+      });
+  }catch(err){
+    return ContentService.createTextOutput(JSON.stringify({ok:false,error:String(err)}))
+      .setMimeType(ContentService.MimeType.JSON)
+      .setHeaders({'Access-Control-Allow-Origin':'*'});
+  }
+}
+function doOptions(e){
+  return ContentService.createTextOutput('')
+    .setHeaders({
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    });
+}
+
+===============================================================================
+노트
+- GitHub Pages에서 클라이언트만으로 로컬 보관은 가능하지만, 중앙 저장을 위해선 위와 같은 간단 백엔드가 필요합니다.
+- 시트 구조는 열이 자동 확장됩니다(제품마다 항목 달라도 OK).
+- 사내망 보안을 위해선 [사내 Google Workspace]에서만 접근 허용하거나, Cloudflare Workers/Supabase 등으로 대체 가능합니다.
+- 이후 요구: 권한(로그인), 목표치 기준/판정 자동화, 알림(메일/슬랙), 월간 리포트 PDF 자동화 등 확장 가능.
+===============================================================================
+-->
