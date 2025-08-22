@@ -3,6 +3,9 @@ import pandas as pd
 from datetime import date
 import json, os, uuid
 
+# 📌 페이지 설정 (가로 전체 레이아웃)
+st.set_page_config(layout="wide")
+
 CSV_FILE = "제품명, 분석항목.csv"
 
 # CSV 읽기
@@ -17,7 +20,7 @@ df_csv.columns = [c.strip() for c in df_csv.columns]
 
 # 필수 컬럼 확인
 if not ("제품명" in df_csv.columns and "분석항목" in df_csv.columns):
-    st.error("CSV에 '제품명' 또는 '분석항목' 컬럼이 없습니다. 실제 컬럼명을 확인하세요.")
+    st.error("CSV에 '제품명' 또는 '분석항목' 컬럼이 없습니다.")
     st.write("현재 CSV 컬럼:", list(df_csv.columns))
     st.stop()
 
@@ -25,14 +28,15 @@ if not ("제품명" in df_csv.columns and "분석항목" in df_csv.columns):
 df = df_csv.copy()
 df["결과"] = ""
 
-st.title("📊 일자별 제품 분석 (st.data_editor 버전)")
+st.title("📊 일자별 제품 분석 (확장된 Excel 스타일)")
 analysis_date = st.date_input("분석 일자", value=date.today())
 
-# Excel 스타일 데이터 에디터
+# Excel 스타일 데이터 에디터 (화면 크게)
 edited_df = st.data_editor(
     df,
     num_rows="dynamic",
-    use_container_width=True,
+    use_container_width=True,  # 화면 전체 폭 사용
+    height=700,                # 세로 크게 (필요하면 900~1000까지도 가능)
     hide_index=True
 )
 
